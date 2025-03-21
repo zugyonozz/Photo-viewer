@@ -9,6 +9,7 @@ SDL_Window* window = nullptr;         // Window initialization
 SDL_Renderer* renderer = nullptr;     // Renderer initialization
 TTF_Font* font = nullptr;             // Font initialization
 GUIElements gui;                      // Initialize the GUI elements structure
+Uint32 lastResizeTime = 0;            // For throttling resize events
 
 void addQueueImage(const char* path) {
     SDL_Surface* surface = IMG_Load(path);
@@ -50,6 +51,11 @@ SDL_Texture* createTextureFromImage(const std::string& path) {
 }
 
 SDL_Texture* createTextureFromText(const std::string& text, SDL_Color color) {
+    if (!font) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Font not initialized");
+        return nullptr;
+    }
+    
     SDL_Surface* surface = TTF_RenderText_Blended(font, text.c_str(), color);
     if (!surface) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to render text: %s", TTF_GetError());
@@ -67,12 +73,12 @@ SDL_Texture* createTextureFromText(const std::string& text, SDL_Color color) {
 }
 
 bool isValidImage(const char* filename) {
-    const char* validExtensions[] = {".png", ".jpg", ".jpeg", ".bmp", ".gif"};
+    const char* validExtensions[] = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"};
     size_t len = strlen(filename);
 
     for (const char* ext : validExtensions) {
         size_t extLen = strlen(ext);
-        if (len >= extLen && strcmp(filename + (len - extLen), ext) == 0) {
+        if (len >= extLen && strcasecmp(filename + (len - extLen), ext) == 0) {
             return true;
         }
     }
@@ -85,17 +91,21 @@ void loadQueueImg(int argc, char* argv[]) {
         return;
     }
 
+    // Track if we successfully loaded any images
+    bool imagesLoaded = false;
+
     for (int i = 1; i < argc; i++) {
         if (isValidImage(argv[i])) {
             addQueueImage(argv[i]);
+            imagesLoaded = true;
             SDL_Log("Successfully loaded image: %s", argv[i]);
         } else {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Not a valid image file: %s", argv[i]);
         }
     }
     
-    // Properly update the image layout after loading all images
-    if (!gui.images.empty()) {
+    // Only update the layout if we have images
+    if (imagesLoaded && !gui.images.empty()) {
         imgLayout();
     }
 }
@@ -105,14 +115,28 @@ void loadTextures() {
     gui.containers.push_back(createTextureFromImage("../assets/imgs/Primary.png"));
     gui.containers.push_back(createTextureFromImage("../assets/imgs/Secondary.png"));
     
+    // Error check for container textures
+    for (size_t i = 0; i < gui.containers.size(); i++) {
+        if (!gui.containers[i]) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load container texture %zu", i);
+        }
+    }
+    
     // Load button textures
     gui.buttons.push_back({createTextureFromImage("../assets/imgs/MinimizeBtn.png"), createTextureFromImage("../assets/imgs/Hov1.png")});
     gui.buttons.push_back({createTextureFromImage("../assets/imgs/MaximizeBtn.png"), createTextureFromImage("../assets/imgs/Hov1.png")});
     gui.buttons.push_back({createTextureFromImage("../assets/imgs/CloseBtn.png"), createTextureFromImage("../assets/imgs/Hov2.png")});
-    gui.buttons.push_back({createTextureFromImage("../assets/imgs/PrevBtn.png"), createTextureFromImage("../assets/imgs/Hov1.png")});
-    gui.buttons.push_back({createTextureFromImage("../assets/imgs/NextBtn.png"), createTextureFromImage("../assets/imgs/Hov1.png")});
+    gui.buttons.push_back({createTextureFromImage("../assets/imgs/PrevBtn.png"), createTextureFromImage("../assets/imgs/PrevBtnHov.png")});
+    gui.buttons.push_back({createTextureFromImage("../assets/imgs/NextBtn.png"), createTextureFromImage("../assets/imgs/NextBtnHov.png")});
     
-    SDL_Log("Textures loaded successfully");
+    // Error check for button textures
+    for (size_t i = 0; i < gui.buttons.size(); i++) {
+        if (!gui.buttons[i].normal || !gui.buttons[i].hover) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load button texture %zu", i);
+        }
+    }
+    
+    SDL_Log("Textures loaded");
 }
 
 void initGUI(int initialWidth, int initialHeight) {
@@ -150,7 +174,8 @@ void initGUI(int initialWidth, int initialHeight) {
     }
     
     // Create window
-    window = SDL_CreateWindow("Image Viewer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, W, H, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+    window = SDL_CreateWindow("Image Viewer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, W, H, 
+                             SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_BORDERLESS);
     if (!window) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create window: %s", SDL_GetError());
         TTF_CloseFont(font);
@@ -172,7 +197,12 @@ void initGUI(int initialWidth, int initialHeight) {
         return;
     }
     
-    // Get the actual window size
+    // Set window hit test callback for drag and resize
+    if (SDL_SetWindowHitTest(window, hitTestCallback, nullptr) != 0) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to set hit test callback: %s", SDL_GetError());
+    }
+    
+    // Get the actual window size (might be different from requested)
     SDL_GetWindowSize(window, &W, &H);
     
     // Load textures
@@ -181,7 +211,7 @@ void initGUI(int initialWidth, int initialHeight) {
     // Initialize layout
     updateLayout();
     
-    SDL_Log("GUI initialized successfully");
+    SDL_Log("GUI initialized successfully: %d x %d", W, H);
 }
 
 void updateLayout() {
@@ -193,20 +223,20 @@ void updateLayout() {
     
     // Update button hover rectangles
     gui.btnHoverRects = {
-        {W - 96, 0, 32, 32},     // Minimize hover
-        {W - 64, 0, 32, 32},     // Maximize hover
-        {W - 32, 0, 32, 32},     // Close hover
-        {W/2 - 32, 0, 32, 32},   // Prev Hovered button
-        {W/2, 0, 32, 32}         // Next Hovered button
+        {W - 96, 0, 32, 32},     			// Minimize hover
+        {W - 64, 0, 32, 32},     			// Maximize hover
+        {W - 32, 0, 32, 32},     			// Close hover
+        {32, H / 2 - 8, 16, 16},	 			// Prev Hovered button
+        {W - 32, H / 2 - 8, 16, 16} 		    // Next Hovered button
     };
     
     // Update button rectangles
     gui.btnRects = {
-        {W - 84, 12, 8, 8},      // Minimize button
-        {W - 52, 12, 8, 8},      // Maximize button
-        {W - 20, 12, 8, 8},      // Close button
-        {W/2 - 20, 12, 8, 8},    // Prev button
-        {W/2 + 12, 12, 8, 8}     // Next button
+        {W - 84, 12, 8, 8},			// Minimize button
+        {W - 52, 12, 8, 8},			// Maximize button
+        {W - 20, 12, 8, 8},			// Close button
+        {32, H / 2 - 8, 16, 16},		// Prev button
+        {W - 32, H / 2 - 8, 16, 16}	// Next button
     };
     
     SDL_Log("Layout updated: %d x %d", W, H);
@@ -216,6 +246,11 @@ void imgLayout() {
     // Clear previous image rects to avoid duplicates when resizing
     gui.imgRects.clear();
     
+    // Check if we have images to display
+    if (gui.images.empty()) {
+        return;
+    }
+    
     // Calculate fitting dimensions for each image
     for (size_t i = 0; i < gui.images.size(); i++) {
         int imgW = gui.images[i].W;
@@ -224,6 +259,12 @@ void imgLayout() {
         // Calculate the maximum available space for the image
         int maxWidth = W - 40;  // 20px padding on each side
         int maxHeight = H - 96; // Accounting for top and bottom bars + padding
+        
+        // Ensure we don't divide by zero
+        if (imgW <= 0 || imgH <= 0 || maxWidth <= 0 || maxHeight <= 0) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Invalid image or window dimensions");
+            continue;
+        }
         
         // Calculate scale to fit while maintaining aspect ratio
         float scaleW = static_cast<float>(maxWidth) / imgW;
@@ -246,37 +287,44 @@ void imgLayout() {
     }
 }
 
-void renderGUI(int mx, int my) {
+void renderContainer(int mx, int my) {
     // Clear screen
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderClear(renderer);
     
     // Render containers
-    for (size_t i = 0; i < gui.containers.size(); i++) {
-        SDL_RenderCopy(renderer, gui.containers[i], nullptr, &gui.containerRects[i]);
+    for (size_t i = 0; i < gui.containers.size() && i < gui.containerRects.size(); i++) {
+        if (gui.containers[i]) {
+            SDL_RenderCopy(renderer, gui.containers[i], nullptr, &gui.containerRects[i]);
+        }
     }
-    
-    // Render buttons with hover effects
-    for (size_t i = 0; i < gui.btnRects.size(); i++) {
+}
+
+void renderBtn(int mx, int my){
+	// Render buttons with hover effects
+    for (size_t i = 0; i < gui.btnRects.size() && i < gui.buttons.size(); i++) {
         const SDL_Rect& btnRect = gui.btnRects[i];
+        const SDL_Rect& hoverRect = gui.btnHoverRects[i];
         
         // Check if mouse is over button
         bool isHovered = (mx >= btnRect.x && mx <= btnRect.x + btnRect.w && 
-                         my >= btnRect.y && my <= btnRect.y + btnRect.h);
+                          my >= btnRect.y && my <= btnRect.y + btnRect.h);
         
         // Render hover effect if needed
-        if (isHovered) {
-            SDL_RenderCopy(renderer, gui.buttons[i].hover, nullptr, &gui.btnHoverRects[i]);
+        if (isHovered && gui.buttons[i].hover) {
+            SDL_RenderCopy(renderer, gui.buttons[i].hover, nullptr, &hoverRect);
         }
         
         // Render button
-        SDL_RenderCopy(renderer, gui.buttons[i].normal, nullptr, &btnRect);
+        if (gui.buttons[i].normal) {
+            SDL_RenderCopy(renderer, gui.buttons[i].normal, nullptr, &btnRect);
+        }
     }
 }
 
 void renderImg(int Nav) { // 0 = prev, 1 = next, 2 = init
     // Check if there are any images to display
-    if (gui.images.empty()) {
+    if (gui.images.empty() || gui.imgRects.empty()) {
         return;
     }
     
@@ -293,7 +341,6 @@ void renderImg(int Nav) { // 0 = prev, 1 = next, 2 = init
     // Display the current image
     if (idShow < gui.images.size() && idShow < gui.imgRects.size()) {
         SDL_RenderCopy(renderer, gui.images[idShow].texture, nullptr, &gui.imgRects[idShow]);
-        SDL_Log("Showing image %zu", idShow);
     }
 }
 
@@ -327,11 +374,17 @@ void handleButtonClick(int x, int y) {
                 case 2: // Close
                     Run = false;
                     break;
+                    
                 case 3: // Previous
-                    renderImg(0);
+                    if (!gui.images.empty()) {
+                        renderImg(0);
+                    }
                     break;
+                    
                 case 4: // Next
-                    renderImg(1);
+                    if (!gui.images.empty()) {
+                        renderImg(1);
+                    }
                     break;
             }
             
@@ -344,27 +397,79 @@ void showGUI() {
     SDL_RenderPresent(renderer);
 }
 
+SDL_HitTestResult hitTestCallback(SDL_Window* win, const SDL_Point* area, void* data) {
+    int w, h;
+    SDL_GetWindowSize(win, &w, &h);
+    
+    int borderSize = 8; // Size of the edge area for resizing
+
+    // Check if cursor is on the edge for resizing
+    if (area->y < borderSize) {
+        if (area->x < borderSize) return SDL_HITTEST_RESIZE_TOPLEFT;
+        if (area->x > w - borderSize) return SDL_HITTEST_RESIZE_TOPRIGHT;
+        return SDL_HITTEST_RESIZE_TOP;
+    }
+    if (area->y > h - borderSize) {
+        if (area->x < borderSize) return SDL_HITTEST_RESIZE_BOTTOMLEFT;
+        if (area->x > w - borderSize) return SDL_HITTEST_RESIZE_BOTTOMRIGHT;
+        return SDL_HITTEST_RESIZE_BOTTOM;
+    }
+    if (area->x < borderSize) return SDL_HITTEST_RESIZE_LEFT;
+    if (area->x > w - borderSize) return SDL_HITTEST_RESIZE_RIGHT;
+
+    // If at the top, consider it as title bar for dragging (except near buttons)
+    if (area->y < 30 && area->x < (w - 100)) return SDL_HITTEST_DRAGGABLE;
+
+    return SDL_HITTEST_NORMAL;
+}
+
 void destroyGUI() {
     // Free image textures
     for (auto& img : gui.images) {
-        SDL_DestroyTexture(img.texture);
+        if (img.texture) {
+            SDL_DestroyTexture(img.texture);
+            img.texture = nullptr;
+        }
     }
+    gui.images.clear();
     
     // Free container textures
     for (auto& texture : gui.containers) {
-        SDL_DestroyTexture(texture);
+        if (texture) {
+            SDL_DestroyTexture(texture);
+            texture = nullptr;
+        }
     }
+    gui.containers.clear();
     
     // Free button textures
     for (auto& button : gui.buttons) {
-        SDL_DestroyTexture(button.normal);
-        SDL_DestroyTexture(button.hover);
+        if (button.normal) {
+            SDL_DestroyTexture(button.normal);
+            button.normal = nullptr;
+        }
+        if (button.hover) {
+            SDL_DestroyTexture(button.hover);
+            button.hover = nullptr;
+        }
     }
+    gui.buttons.clear();
     
     // Free resources
-    TTF_CloseFont(font);
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
+    if (font) {
+        TTF_CloseFont(font);
+        font = nullptr;
+    }
+    
+    if (renderer) {
+        SDL_DestroyRenderer(renderer);
+        renderer = nullptr;
+    }
+    
+    if (window) {
+        SDL_DestroyWindow(window);
+        window = nullptr;
+    }
     
     // Quit subsystems
     IMG_Quit();

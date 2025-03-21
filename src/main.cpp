@@ -1,6 +1,7 @@
 // main.cpp
 // date created 16-03-2025
 // author: zugyonozz
+// optimized: 22-03-2025
 #define SDL_MAIN_HANDLED
 #include "gui.h"
 
@@ -8,9 +9,20 @@ int main(int argc, char* argv[]) {
     SDL_Event e;
     bool isClick = false;
     int mx = 0, my = 0;
+    bool pendingResize = false;
     
     // Initialize GUI with default window size
     initGUI(800, 600);
+    
+    // Set window hit test callback for dragging and resizing
+    if (SDL_SetWindowHitTest(window, hitTestCallback, nullptr) != 0) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to set hit test callback: %s", SDL_GetError());
+    }
+    
+    // Set window as resizable
+    SDL_SetWindowResizable(window, SDL_TRUE);
+    
+    // Load images from command-line arguments
     loadQueueImg(argc, argv);
     
     // Initial rendering of image if available
@@ -29,9 +41,9 @@ int main(int argc, char* argv[]) {
                 case SDL_KEYDOWN:
                     if (e.key.keysym.sym == SDLK_ESCAPE) {
                         Run = false;
-                    } else if (e.key.keysym.sym == SDLK_LEFT) {
+                    } else if (e.key.keysym.sym == SDLK_LEFT && !gui.images.empty()) {
                         renderImg(0);  // Previous image
-                    } else if (e.key.keysym.sym == SDLK_RIGHT) {
+                    } else if (e.key.keysym.sym == SDLK_RIGHT && !gui.images.empty()) {
                         renderImg(1);  // Next image
                     }
                     break;
@@ -53,18 +65,33 @@ int main(int argc, char* argv[]) {
                     break;
                     
                 case SDL_WINDOWEVENT:
-                    if (e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED || 
-                        e.window.event == SDL_WINDOWEVENT_RESIZED) {
-                        SDL_GetWindowSize(window, &W, &H);
-                        updateLayout();
-                        imgLayout();
+                    if (e.window.event == SDL_WINDOWEVENT_RESIZED || 
+                        e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+                        
+                        // Mark that we need to process a resize, but don't do it immediately
+                        pendingResize = true;
+                        lastResizeTime = SDL_GetTicks();
                     }
                     break;
             }
         }
         
+        // Handle any pending resize after the delay to avoid excessive calculations
+        if (pendingResize && SDL_GetTicks() - lastResizeTime > RESIZE_DELAY) {
+            // Get updated window size
+            SDL_GetWindowSize(window, &W, &H);
+            SDL_Log("Window resized to %d x %d", W, H);
+            
+            // Update layout for the new size
+            updateLayout();
+            imgLayout();
+            
+            pendingResize = false;
+        }
+        
         // Render GUI and current image
-        renderGUI(mx, my);
+        renderContainer(mx, my);
+		renderBtn(mx, my);
         
         // Only render image if images are loaded
         if (!gui.images.empty()) {
