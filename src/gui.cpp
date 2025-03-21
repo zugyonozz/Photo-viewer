@@ -4,22 +4,22 @@
 // GUI.cpp
 #include "gui.h"
 
-int W = 800;
-int H = 600;  // Default window size
-bool Run = true;
-SDL_Window* window = nullptr;
-SDL_Renderer* renderer = nullptr;
-TTF_Font* font = nullptr;
-std::vector<Img> queueImg;
+int W = 800;							// Default window size
+int H = 600;							// Default window size
+size_t idShow;							// Index Gambar yang di tampilkan
+bool Run = true;						// Parameter jalan program
+SDL_Window* window = nullptr;			// inisialisasi Window
+SDL_Renderer* renderer = nullptr;		// inisialisasi Renderer
+TTF_Font* font = nullptr;				// inisialisasi Font
 
-// Use better naming and organization
-struct GUIElements {
-    std::vector<SDL_Texture*> containers;
-    std::vector<BtnTexture> buttons;
-    std::vector<SDL_Rect> containerRects;
-    std::vector<SDL_Rect> btnHoverRects;
-    std::vector<SDL_Rect> btnRects;
-	std::vector<SDL_Rect> imgRects;
+struct GUIElements {						// Struktur Element GUI
+    std::vector<SDL_Texture*> containers;	// Deklarasi Container list
+    std::vector<BtnTexture> buttons;		// Deklarasi Button list
+	std::vector<Img> Img;					// Deklarasi Image List
+    std::vector<SDL_Rect> containerRects;	// Deklarasi Container Rect list
+    std::vector<SDL_Rect> btnHoverRects;	// Deklarasi Hovering Button Rect list
+    std::vector<SDL_Rect> btnRects;			// Deklarasi Button Rect list
+	std::vector<SDL_Rect> imgRects;			// Deklarasi imgRect list
 } gui;
 
 
@@ -40,7 +40,7 @@ void addQueueImage(const char* path) {  // Ubah void* jadi void
     }
 
     img = {texture, surface->w, surface->h};
-    queueImg.push_back(img);
+    gui.Img.push_back(img);
     SDL_FreeSurface(surface);
     SDL_Log("Successfully loaded image: %s", path);
 }
@@ -140,7 +140,7 @@ void initGUI(int initialWidth, int initialHeight) {
         return;
     }
     
-    int imgFlags = IMG_INIT_PNG;
+    int imgFlags = IMG_INIT_JPG | IMG_INIT_PNG | IMG_INIT_WEBP;
     if ((IMG_Init(imgFlags) & imgFlags) != imgFlags) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SDL_image initialization failed: %s", IMG_GetError());
         TTF_Quit();
@@ -159,7 +159,7 @@ void initGUI(int initialWidth, int initialHeight) {
     }
     
     // Create window
-    window = SDL_CreateWindow("1", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, W, H, SDL_WINDOW_SHOWN | SDL_WINDOW_BORDERLESS| SDL_WINDOW_RESIZABLE);
+    window = SDL_CreateWindow("1", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, W, H, SDL_WINDOW_SHOWN| SDL_WINDOW_RESIZABLE);
     if (!window) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create window: %s", SDL_GetError());
         TTF_CloseFont(font);
@@ -189,7 +189,7 @@ void initGUI(int initialWidth, int initialHeight) {
     
     // Initialize layout
     updateLayout();
-    
+    imgLayout();
     SDL_Log("GUI initialized successfully");
 }
 
@@ -221,10 +221,12 @@ void updateLayout() {
     SDL_Log("Layout updated: %d x %d", W, H);
 }
 
-void initLayoutImg(){
-	
-	for(size_t i = 0; i < queueImg.size(); i++){
-		SDL_Rect rect = {W/2 - queueImg[i].W, 32, queueImg[i].W}
+void imgLayout(){
+	for(size_t i = 0; i < gui.Img.size(); i++){
+		int fitScale = gui.Img[i].H / (H - 96);
+		SDL_Rect rect = {W/2 - gui.Img[i].W, 32, gui.Img[i].W / fitScale, gui.Img[i].H / fitScale};
+		gui.imgRects.push_back(rect);
+		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Successfullty Fitting Image (%i, %i, %i, %i)", rect.x, rect.y, rect.w, rect.h);
 	}
 }
 
@@ -255,6 +257,23 @@ void renderGUI(int mx, int my) {
     }
 }
 
+void renderImg(int Nav){ // 0 = prev, 1 = next, 2 = init
+	if(Nav == 2){
+		idShow = 0;
+	}else if(Nav == 0 && idShow > 0){
+		idShow++;
+	}else if(Nav == 1 && idShow < gui.Img.size() - 1){
+		idShow++;
+	}else if((Nav && idShow) == 0){
+		idShow = gui.Img.size() - 1;
+	}else{
+		idShow = 0;
+	}
+
+	SDL_RenderCopy(renderer, gui.Img[idShow].texture, nullptr, &gui.imgRects[idShow]);
+	SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Successfullty Show Image");
+}
+
 void handleButtonClick(int x, int y) {
     for (size_t i = 0; i < gui.btnRects.size(); i++) {
         const SDL_Rect& btnRect = gui.btnRects[i];
@@ -281,6 +300,12 @@ void handleButtonClick(int x, int y) {
                 case 2: // Close
                     Run = false;
                     break;
+				case 3:
+					renderImg(0); // prev
+					break;
+				case 4: // next
+					renderImg(1);
+					break;
             }
             
             break; // Exit the loop after handling one button

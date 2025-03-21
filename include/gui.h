@@ -27,6 +27,8 @@ extern int W;
 extern int H;
 
 void loadQueueImg(int argc, char* argv[]);
+void renderImg(int Nav = 2);
+void imgLayout();
 void initGUI(int initialWidth = 800, int initialHeight = 600);
 void destroyGUI();
 void updateLayout();

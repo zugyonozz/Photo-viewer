@@ -16,7 +16,7 @@ OBJ_DIR = bin/obj
 SRCS_CPP = $(wildcard $(SRC_DIR)/*.cpp)
 OBJS_CPP = $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SRCS_CPP))
 OBJS = $(OBJS_CPP)
-TARGET = $(BIN_DIR)/SDL-TD-Game.exe
+TARGET = $(BIN_DIR)/View.exe
 
 # Create obj directory if it doesn't exist
 $(shell mkdir -p $(OBJ_DIR))
@@ -43,6 +43,6 @@ rebuild: clean all
 
 # Run the program
 run: $(TARGET)
-	cd $(BIN_DIR) && ./SDL-TD-Game.exe
+	cd $(BIN_DIR) && ./View.exe
 
 .PHONY: all clean rebuild run

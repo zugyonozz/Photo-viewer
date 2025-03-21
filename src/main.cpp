@@ -11,6 +11,7 @@ int main(int argc, char* argv[]) {
     
     // Initialize GUI with default window size
     initGUI();
+	loadQueueImg(argc, argv);
     
     while (Run) {
         // Handle events with 16ms timeout (approx. 60 FPS)
@@ -47,6 +48,7 @@ int main(int argc, char* argv[]) {
                         e.window.event == SDL_WINDOWEVENT_RESIZED) {
                         SDL_GetWindowSize(window, &W, &H);
                         updateLayout();
+						imgLayout();
                     }
                     break;
             }
@@ -54,6 +56,7 @@ int main(int argc, char* argv[]) {
         
         // Render GUI
         renderGUI(mx, my);
+		renderImg();
         showGUI();
     }
     
