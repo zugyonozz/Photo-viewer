@@ -10,8 +10,13 @@ int main(int argc, char* argv[]) {
     int mx = 0, my = 0;
     
     // Initialize GUI with default window size
-    initGUI();
-	loadQueueImg(argc, argv);
+    initGUI(800, 600);
+    loadQueueImg(argc, argv);
+    
+    // Initial rendering of image if available
+    if (!gui.images.empty()) {
+        renderImg(2);  // Initialize with first image
+    }
     
     while (Run) {
         // Handle events with 16ms timeout (approx. 60 FPS)
@@ -24,6 +29,10 @@ int main(int argc, char* argv[]) {
                 case SDL_KEYDOWN:
                     if (e.key.keysym.sym == SDLK_ESCAPE) {
                         Run = false;
+                    } else if (e.key.keysym.sym == SDLK_LEFT) {
+                        renderImg(0);  // Previous image
+                    } else if (e.key.keysym.sym == SDLK_RIGHT) {
+                        renderImg(1);  // Next image
                     }
                     break;
                     
@@ -48,15 +57,20 @@ int main(int argc, char* argv[]) {
                         e.window.event == SDL_WINDOWEVENT_RESIZED) {
                         SDL_GetWindowSize(window, &W, &H);
                         updateLayout();
-						imgLayout();
+                        imgLayout();
                     }
                     break;
             }
         }
         
-        // Render GUI
+        // Render GUI and current image
         renderGUI(mx, my);
-		renderImg();
+        
+        // Only render image if images are loaded
+        if (!gui.images.empty()) {
+            renderImg(2);  // Use 2 to maintain current image
+        }
+        
         showGUI();
     }
     

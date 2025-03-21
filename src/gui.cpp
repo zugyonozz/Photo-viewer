@@ -1,31 +1,16 @@
-// main.cpp
-// date created 16-03-2025
-// author: zugyonozz
 // GUI.cpp
 #include "gui.h"
 
-int W = 800;							// Default window size
-int H = 600;							// Default window size
-size_t idShow;							// Index Gambar yang di tampilkan
-bool Run = true;						// Parameter jalan program
-SDL_Window* window = nullptr;			// inisialisasi Window
-SDL_Renderer* renderer = nullptr;		// inisialisasi Renderer
-TTF_Font* font = nullptr;				// inisialisasi Font
+int W = 800;                          // Default window size
+int H = 600;                          // Default window size
+size_t idShow = 0;                    // Index of currently displayed image (initialized to 0)
+bool Run = true;                      // Program running flag
+SDL_Window* window = nullptr;         // Window initialization
+SDL_Renderer* renderer = nullptr;     // Renderer initialization
+TTF_Font* font = nullptr;             // Font initialization
+GUIElements gui;                      // Initialize the GUI elements structure
 
-struct GUIElements {						// Struktur Element GUI
-    std::vector<SDL_Texture*> containers;	// Deklarasi Container list
-    std::vector<BtnTexture> buttons;		// Deklarasi Button list
-	std::vector<Img> Img;					// Deklarasi Image List
-    std::vector<SDL_Rect> containerRects;	// Deklarasi Container Rect list
-    std::vector<SDL_Rect> btnHoverRects;	// Deklarasi Hovering Button Rect list
-    std::vector<SDL_Rect> btnRects;			// Deklarasi Button Rect list
-	std::vector<SDL_Rect> imgRects;			// Deklarasi imgRect list
-} gui;
-
-
-
-void addQueueImage(const char* path) {  // Ubah void* jadi void
-    Img img;
+void addQueueImage(const char* path) {
     SDL_Surface* surface = IMG_Load(path);
     if (!surface) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load image %s: %s", path, IMG_GetError());
@@ -34,13 +19,14 @@ void addQueueImage(const char* path) {  // Ubah void* jadi void
 
     SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
     if (!texture) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create texture %s: %s", path, IMG_GetError());
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create texture %s: %s", path, SDL_GetError());
         SDL_FreeSurface(surface);
         return;
     }
 
-    img = {texture, surface->w, surface->h};
-    gui.Img.push_back(img);
+    // Store original dimensions for calculations
+    Img img = {texture, surface->w, surface->h};
+    gui.images.push_back(img);
     SDL_FreeSurface(surface);
     SDL_Log("Successfully loaded image: %s", path);
 }
@@ -93,19 +79,24 @@ bool isValidImage(const char* filename) {
     return false;
 }
 
-void loadQueueImg(int argc, char* argv[]) {  // Tambahkan argc
+void loadQueueImg(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Tidak ada file yang diberikan!" << std::endl;
+        std::cerr << "No image files provided!" << std::endl;
         return;
     }
 
-    for (int i = 1; i < argc; i++) {  // Gunakan argc untuk iterasi
+    for (int i = 1; i < argc; i++) {
         if (isValidImage(argv[i])) {
             addQueueImage(argv[i]);
-            SDL_Log("Berhasil Memuat Gambar: %s", argv[i]);
+            SDL_Log("Successfully loaded image: %s", argv[i]);
         } else {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "File bukan gambar yang valid: %s", argv[i]);
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Not a valid image file: %s", argv[i]);
         }
+    }
+    
+    // Properly update the image layout after loading all images
+    if (!gui.images.empty()) {
+        imgLayout();
     }
 }
 
@@ -118,8 +109,8 @@ void loadTextures() {
     gui.buttons.push_back({createTextureFromImage("../assets/imgs/MinimizeBtn.png"), createTextureFromImage("../assets/imgs/Hov1.png")});
     gui.buttons.push_back({createTextureFromImage("../assets/imgs/MaximizeBtn.png"), createTextureFromImage("../assets/imgs/Hov1.png")});
     gui.buttons.push_back({createTextureFromImage("../assets/imgs/CloseBtn.png"), createTextureFromImage("../assets/imgs/Hov2.png")});
-	gui.buttons.push_back({createTextureFromImage("../assets/imgs/PrevBtn.png"), createTextureFromImage("../assets/imgs/Hov1.png")});
-	gui.buttons.push_back({createTextureFromImage("../assets/imgs/NextBtn.png"), createTextureFromImage("../assets/imgs/Hov1.png")});
+    gui.buttons.push_back({createTextureFromImage("../assets/imgs/PrevBtn.png"), createTextureFromImage("../assets/imgs/Hov1.png")});
+    gui.buttons.push_back({createTextureFromImage("../assets/imgs/NextBtn.png"), createTextureFromImage("../assets/imgs/Hov1.png")});
     
     SDL_Log("Textures loaded successfully");
 }
@@ -159,7 +150,7 @@ void initGUI(int initialWidth, int initialHeight) {
     }
     
     // Create window
-    window = SDL_CreateWindow("1", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, W, H, SDL_WINDOW_SHOWN| SDL_WINDOW_RESIZABLE);
+    window = SDL_CreateWindow("Image Viewer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, W, H, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
     if (!window) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create window: %s", SDL_GetError());
         TTF_CloseFont(font);
@@ -189,7 +180,7 @@ void initGUI(int initialWidth, int initialHeight) {
     
     // Initialize layout
     updateLayout();
-    imgLayout();
+    
     SDL_Log("GUI initialized successfully");
 }
 
@@ -204,9 +195,9 @@ void updateLayout() {
     gui.btnHoverRects = {
         {W - 96, 0, 32, 32},     // Minimize hover
         {W - 64, 0, 32, 32},     // Maximize hover
-        {W - 32, 0, 32, 32},      // Close hover
-		{W/2 - 32, 0, 32, 32},     // Prev Hovered button
-		{W/2, 0, 32, 32}		 // Next Hovered button
+        {W - 32, 0, 32, 32},     // Close hover
+        {W/2 - 32, 0, 32, 32},   // Prev Hovered button
+        {W/2, 0, 32, 32}         // Next Hovered button
     };
     
     // Update button rectangles
@@ -214,20 +205,45 @@ void updateLayout() {
         {W - 84, 12, 8, 8},      // Minimize button
         {W - 52, 12, 8, 8},      // Maximize button
         {W - 20, 12, 8, 8},      // Close button
-		{W/2 - 20, 12, 8, 8},     // Prev button
-		{W/2 + 12, 12, 8, 8}		 // Next button
+        {W/2 - 20, 12, 8, 8},    // Prev button
+        {W/2 + 12, 12, 8, 8}     // Next button
     };
     
     SDL_Log("Layout updated: %d x %d", W, H);
 }
 
-void imgLayout(){
-	for(size_t i = 0; i < gui.Img.size(); i++){
-		int fitScale = gui.Img[i].H / (H - 96);
-		SDL_Rect rect = {W/2 - gui.Img[i].W, 32, gui.Img[i].W / fitScale, gui.Img[i].H / fitScale};
-		gui.imgRects.push_back(rect);
-		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Successfullty Fitting Image (%i, %i, %i, %i)", rect.x, rect.y, rect.w, rect.h);
-	}
+void imgLayout() {
+    // Clear previous image rects to avoid duplicates when resizing
+    gui.imgRects.clear();
+    
+    // Calculate fitting dimensions for each image
+    for (size_t i = 0; i < gui.images.size(); i++) {
+        int imgW = gui.images[i].W;
+        int imgH = gui.images[i].H;
+        
+        // Calculate the maximum available space for the image
+        int maxWidth = W - 40;  // 20px padding on each side
+        int maxHeight = H - 96; // Accounting for top and bottom bars + padding
+        
+        // Calculate scale to fit while maintaining aspect ratio
+        float scaleW = static_cast<float>(maxWidth) / imgW;
+        float scaleH = static_cast<float>(maxHeight) / imgH;
+        float scale = std::min(scaleW, scaleH);
+        
+        // Calculate final dimensions
+        int finalWidth = static_cast<int>(imgW * scale);
+        int finalHeight = static_cast<int>(imgH * scale);
+        
+        // Center the image
+        int x = (W - finalWidth) / 2;
+        int y = ((H - 32) - finalHeight) / 2 + 16; // Centered in main area, below top controls
+        
+        // Create and store the rect
+        SDL_Rect rect = {x, y, finalWidth, finalHeight};
+        gui.imgRects.push_back(rect);
+        
+        SDL_Log("Image %zu layout: (%d, %d, %d, %d)", i, rect.x, rect.y, rect.w, rect.h);
+    }
 }
 
 void renderGUI(int mx, int my) {
@@ -245,7 +261,8 @@ void renderGUI(int mx, int my) {
         const SDL_Rect& btnRect = gui.btnRects[i];
         
         // Check if mouse is over button
-        bool isHovered = (mx >= btnRect.x && mx <= btnRect.x + btnRect.w && my >= btnRect.y && my <= btnRect.y + btnRect.h);
+        bool isHovered = (mx >= btnRect.x && mx <= btnRect.x + btnRect.w && 
+                         my >= btnRect.y && my <= btnRect.y + btnRect.h);
         
         // Render hover effect if needed
         if (isHovered) {
@@ -257,21 +274,27 @@ void renderGUI(int mx, int my) {
     }
 }
 
-void renderImg(int Nav){ // 0 = prev, 1 = next, 2 = init
-	if(Nav == 2){
-		idShow = 0;
-	}else if(Nav == 0 && idShow > 0){
-		idShow++;
-	}else if(Nav == 1 && idShow < gui.Img.size() - 1){
-		idShow++;
-	}else if((Nav && idShow) == 0){
-		idShow = gui.Img.size() - 1;
-	}else{
-		idShow = 0;
-	}
-
-	SDL_RenderCopy(renderer, gui.Img[idShow].texture, nullptr, &gui.imgRects[idShow]);
-	SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Successfullty Show Image");
+void renderImg(int Nav) { // 0 = prev, 1 = next, 2 = init
+    // Check if there are any images to display
+    if (gui.images.empty()) {
+        return;
+    }
+    
+    // Update the current image index based on navigation
+    if (Nav == 2) {
+        // Keep current image or initialize to first image
+        idShow = (idShow < gui.images.size()) ? idShow : 0;
+    } else if (Nav == 0) { // Previous
+        idShow = (idShow > 0) ? idShow - 1 : gui.images.size() - 1;
+    } else if (Nav == 1) { // Next
+        idShow = (idShow < gui.images.size() - 1) ? idShow + 1 : 0;
+    }
+    
+    // Display the current image
+    if (idShow < gui.images.size() && idShow < gui.imgRects.size()) {
+        SDL_RenderCopy(renderer, gui.images[idShow].texture, nullptr, &gui.imgRects[idShow]);
+        SDL_Log("Showing image %zu", idShow);
+    }
 }
 
 void handleButtonClick(int x, int y) {
@@ -294,18 +317,22 @@ void handleButtonClick(int x, int y) {
                         } else {
                             SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
                         }
+                        // Update layout after fullscreen change
+                        SDL_GetWindowSize(window, &W, &H);
+                        updateLayout();
+                        imgLayout();
                     }
                     break;
                     
                 case 2: // Close
                     Run = false;
                     break;
-				case 3:
-					renderImg(0); // prev
-					break;
-				case 4: // next
-					renderImg(1);
-					break;
+                case 3: // Previous
+                    renderImg(0);
+                    break;
+                case 4: // Next
+                    renderImg(1);
+                    break;
             }
             
             break; // Exit the loop after handling one button
@@ -318,11 +345,17 @@ void showGUI() {
 }
 
 void destroyGUI() {
-    // Free textures
+    // Free image textures
+    for (auto& img : gui.images) {
+        SDL_DestroyTexture(img.texture);
+    }
+    
+    // Free container textures
     for (auto& texture : gui.containers) {
         SDL_DestroyTexture(texture);
     }
     
+    // Free button textures
     for (auto& button : gui.buttons) {
         SDL_DestroyTexture(button.normal);
         SDL_DestroyTexture(button.hover);
